@@ -1,6 +1,8 @@
 import asyncio
 import os
+import threading
 import sqlite3
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -17,7 +19,7 @@ from scheduler import start_scheduler
 
 load_dotenv()
 
-# Состояния
+# Состояния диалогов
 DESCRIPTION, DATETIME, DURATION, ASSIGNEE = range(4)
 EDIT_SELECT, EDIT_TEXT, EDIT_DATETIME = range(10, 13)
 
@@ -286,7 +288,26 @@ async def disable_personal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_personal_notifications(user_id, False)
     await update.message.reply_text("🔕 Личные уведомления отключены. Все сообщения — только в общем чате.")
 
-# ===== Запуск =====
+# ===== ФИКТИВНЫЙ HTTP-СЕРВЕР ДЛЯ RENDER =====
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/":
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"HTTP server running on port {port}")
+    server.serve_forever()
+
+# ===== ЗАПУСК =====
 
 def main():
     init_db()
@@ -330,6 +351,10 @@ def main():
     app.add_handler(conv_edit)
 
     start_scheduler(app.bot, GROUP_CHAT_ID, ALENA_USER_ID, OLEG_USER_ID, get_personal_notifications)
+
+    # Запуск HTTP-сервера в фоне
+    http_thread = threading.Thread(target=run_http_server, daemon=True)
+    http_thread.start()
 
     print("Бот запущен...")
     app.run_polling()
